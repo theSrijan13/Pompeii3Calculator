@@ -60,6 +60,26 @@ interface WeightDetails {
   perPiecePrice: string;
 }
 
+interface EarringLogic {
+  detected: boolean;
+  type?: string | null;
+  note: string;
+  multiplier?: number;
+  doubledCost?: number;
+  doubledMfgPrice?: number;
+  doubledPart2Price?: number;
+}
+
+interface EnhancedCalculationDetails {
+  rate?: string | number;
+  weight?: number;
+  baseCost?: number | null;
+  earringLogic: EarringLogic;
+  totalCost: number | null;
+  mfgPartPrice?: number;
+  part2Price?: number;
+}
+
 // Enhanced specifications interface to handle various input types
 interface ProcessedSpecifications {
   metal_purity: string;
@@ -88,6 +108,49 @@ const ERROR_TYPES = {
   INVALID_PURITY: "Invalid purity value",
   MISSING_PRICING_DATA: "Missing pricing data for lookup"
 } as const;
+
+// ============================================================================
+// EARRING LOGIC CONSTANTS AND FUNCTIONS
+// ============================================================================
+
+const EARRING_PATTERNS = [
+  { type: "studs", pattern: /\bstud(s)?\b/i },
+  { type: "earrings", pattern: /\bearring(s)?\b/i },
+  { type: "hoops", pattern: /\bhoop(s)?\b/i },
+  { type: "push_backings", pattern: /\bpush\s*back(ing)?s?\b/i }
+];
+
+/**
+ * Detects if the product is an earring-related item that requires doubling the metal cost
+ */
+function detectEarringType(productData: any): { isEarring: boolean; type: string | null; note: string } {
+  if (!productData || typeof productData !== 'object') {
+    return { isEarring: false, type: null, note: "No product data available for earring detection" };
+  }
+
+  // Check common fields for earring patterns
+  const fieldsToCheck = [
+    productData.Title || '',
+    productData.Description || '',
+    productData.Category || '',
+    productData.Type || '',
+    productData.Name || ''
+  ];
+
+  const searchText = fieldsToCheck.join(' ').toLowerCase();
+
+  for (const earringPattern of EARRING_PATTERNS) {
+    if (earringPattern.pattern.test(searchText)) {
+      return {
+        isEarring: true,
+        type: earringPattern.type,
+        note: `Earring type detected: ${earringPattern.type}. Metal cost will be doubled for pair.`
+      };
+    }
+  }
+
+  return { isEarring: false, type: null, note: "Not an earring-related product" };
+};
 
 // ============================================================================
 // ERROR HANDLING
@@ -333,7 +396,7 @@ function lookupLeesItem(partNumber: string): LookupResult {
 /**
  * Lee's Manufacturing specific cost calculation.
  */
-function calculateLeesCost(data: SupplierData): CalculationResult {
+function calculateLeesCost(data: SupplierData, productData?: any): CalculationResult {
   const dataValidationErrors = validateSupplierData(data);
   if (dataValidationErrors.length > 0) {
     return createErrorResult(
@@ -393,13 +456,46 @@ function calculateLeesCost(data: SupplierData): CalculationResult {
   
   // At least one part must have a valid price
   if (mfgPartResult.price !== null || part2Result.price !== null) {
-    metalCost = mfgPrice + part2Price;
+    const baseCost = mfgPrice + part2Price;
     
-    details.calculation = {
-      mfgPartPrice: mfgPrice,
-      part2Price: part2Price,
-      totalCost: metalCost
-    };
+    // Check for earring logic
+    const earringDetection = detectEarringType(productData);
+    
+    if (earringDetection.isEarring) {
+      // Apply earring logic - double both parts individually
+      const doubledMfgPrice = mfgPrice * 2;
+      const doubledPart2Price = part2Price * 2;
+      metalCost = doubledMfgPrice + doubledPart2Price;
+      
+      details.calculation = {
+        mfgPartPrice: mfgPrice,
+        part2Price: part2Price,
+        baseCost: baseCost,
+        earringLogic: {
+          detected: true,
+          type: earringDetection.type,
+          note: earringDetection.note,
+          doubledMfgPrice: doubledMfgPrice,
+          doubledPart2Price: doubledPart2Price
+        },
+        totalCost: metalCost
+      };
+      
+      // Add earring note to details
+      details.earringLogic = earringDetection.note;
+    } else {
+      metalCost = baseCost;
+      
+      details.calculation = {
+        mfgPartPrice: mfgPrice,
+        part2Price: part2Price,
+        earringLogic: {
+          detected: false,
+          note: earringDetection.note
+        },
+        totalCost: metalCost
+      };
+    }
 
     if (metalCost >= 0) { // Allow zero cost
       return createSuccessResult(
@@ -431,7 +527,8 @@ function calculateLeesCost(data: SupplierData): CalculationResult {
 function calculateStandardCost(
   data: SupplierData, 
   specifications: EnrichProductSpecificationsOutput, 
-  method: 'standard' | 'standard_fallback' = 'standard'
+  method: 'standard' | 'standard_fallback' = 'standard',
+  productData?: any
 ): CalculationResult {
   const supplierName = data['Supplier Name'] || "Standard Calculation";
   
@@ -479,8 +576,28 @@ function calculateStandardCost(
   }
 
   // Calculate cost
+  let baseCost: number | null = null;
+  let earringLogic: any = { detected: false, note: "Not an earring-related product" };
+  
   if (typeof applicableRate === 'number' && weight > 0) {
-    metalCost = applicableRate * weight;
+    baseCost = applicableRate * weight;
+    
+    // Check for earring logic
+    const earringDetection = detectEarringType(productData);
+    earringLogic = {
+      detected: earringDetection.isEarring,
+      type: earringDetection.type,
+      note: earringDetection.note
+    };
+    
+    if (earringDetection.isEarring) {
+      // Apply earring logic - double the total cost
+      metalCost = baseCost * 2;
+      earringLogic.multiplier = 2;
+      earringLogic.doubledCost = metalCost;
+    } else {
+      metalCost = baseCost;
+    }
   } else if (typeof applicableRate !== 'number') {
     errors.push(ERROR_TYPES.INVALID_PURITY);
   }
@@ -501,8 +618,11 @@ function calculateStandardCost(
     calculation: {
       rate: applicableRate,
       weight: weight,
+      baseCost: baseCost,
+      earringLogic: earringLogic,
       totalCost: metalCost
-    }
+    },
+    earringLogic: earringLogic.note
   };
 
   if (metalCost !== null && metalCost >= 0) {
@@ -527,11 +647,11 @@ function calculateStandardCost(
 // SUPPLIER HANDLERS
 // ============================================================================
 
-const supplierCostHandlers: Record<string, (data: SupplierData, specs: EnrichProductSpecificationsOutput) => CalculationResult> = {
-  "lee's manufacturing": (data, specs) => calculateLeesCost(data),
-  "lees manufacturing": (data, specs) => calculateLeesCost(data),
-  "lee's": (data, specs) => calculateLeesCost(data),
-  "lees": (data, specs) => calculateLeesCost(data)
+const supplierCostHandlers: Record<string, (data: SupplierData, specs: EnrichProductSpecificationsOutput, productData?: any) => CalculationResult> = {
+  "lee's manufacturing": (data, specs, productData) => calculateLeesCost(data, productData),
+  "lees manufacturing": (data, specs, productData) => calculateLeesCost(data, productData),
+  "lee's": (data, specs, productData) => calculateLeesCost(data, productData),
+  "lees": (data, specs, productData) => calculateLeesCost(data, productData)
 };
 
 // ============================================================================
@@ -541,10 +661,12 @@ const supplierCostHandlers: Record<string, (data: SupplierData, specs: EnrichPro
 /**
  * Main function to calculate metal cost.
  * Tries supplier-specific logic first, then falls back to standard calculation.
+ * Applies earring logic for studs, earrings, hoops, and push backings.
  */
 export function calculateMetalCost(
   data: SupplierData, 
-  specifications: EnrichProductSpecificationsOutput
+  specifications: EnrichProductSpecificationsOutput,
+  productData?: any
 ): CalculationResult {
   try {
     // Validate inputs
@@ -569,13 +691,13 @@ export function calculateMetalCost(
     // Try supplier-specific handler first
     if (supplier && supplierCostHandlers[supplier]) {
       const handler = supplierCostHandlers[supplier];
-      const result = handler(data, specifications);
+      const result = handler(data, specifications, productData);
       
       // If supplier-specific logic fails, try standard fallback
       if (!result.isSuccess) {
         const specValidationErrors = validateSpecifications(specifications);
         if (specValidationErrors.length === 0) {
-          const fallbackResult = calculateStandardCost(data, specifications, 'standard_fallback');
+          const fallbackResult = calculateStandardCost(data, specifications, 'standard_fallback', productData);
           
           if (fallbackResult.isSuccess) {
             // Combine information from both attempts
@@ -600,7 +722,7 @@ export function calculateMetalCost(
     }
 
     // Use standard calculation for unknown suppliers or when no supplier specified
-    return calculateStandardCost(data, specifications, 'standard');
+    return calculateStandardCost(data, specifications, 'standard', productData);
 
   } catch (error) {
     return createErrorResult(
@@ -623,11 +745,15 @@ export {
   type PurityDetails,
   type WeightDetails,
   type ProcessedSpecifications,
+  type EarringLogic,
+  type EnhancedCalculationDetails,
   MetalCostCalculationError,
   STANDARD_METAL_RATES,
   ERROR_TYPES,
+  EARRING_PATTERNS,
   validateSpecifications,
   lookupLeesItem,
   validateSupplierData,
-  processSpecifications
+  processSpecifications,
+  detectEarringType
 };

@@ -10,7 +10,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 
 const formatCurrency = (amount: number | string | null | undefined) => {
-  if (typeof amount === 'string') return amount;
+  if (typeof amount === 'string') {
+    return amount;
+  }
   if (typeof amount !== 'number' || isNaN(amount)) {
     return 'N/A';
   }
@@ -23,10 +25,15 @@ const formatCurrency = (amount: number | string | null | undefined) => {
 const LeesManufacturingDetails = ({ details }: { details: any }) => {
     const mfgPart = details.mfg_and_part || {};
     const part2 = details.part_2 || {};
+    const calculation = details.calculation || {};
     
     const mfgPrice = mfgPart.perPiecePrice || 0;
     const part2Price = part2.perPiecePrice || 0;
-    const total = mfgPrice + part2Price;
+    const baseCost = mfgPrice + part2Price;
+    
+    // Check if earring logic was applied
+    const { earringLogic } = calculation;
+    const isEarringProduct = earringLogic?.detected;
 
     return (
         <div className="space-y-4 text-sm font-mono">
@@ -36,7 +43,7 @@ const LeesManufacturingDetails = ({ details }: { details: any }) => {
             <div className="bg-secondary/30 p-3 rounded-lg border">
                 <div className="flex justify-between items-center font-semibold">
                     <span>MFG & Part #: {mfgPart.original || 'N/A'}</span>
-                    <span>{formatCurrency(mfgPart.perPiecePrice)}</span>
+                    <span>{formatCurrency(mfgPrice)}</span>
                 </div>
                 <div className="pl-4 mt-1 space-y-1 text-muted-foreground text-xs">
                     <p>&#x21B3; Match: {mfgPart.processed} ({mfgPart.matchType})</p>
@@ -48,17 +55,43 @@ const LeesManufacturingDetails = ({ details }: { details: any }) => {
              <div className="bg-secondary/30 p-3 rounded-lg border">
                 <div className="flex justify-between items-center font-semibold">
                     <span>Part #2: {part2.original || 'N/A'}</span>
-                    <span>{formatCurrency(part2.perPiecePrice)}</span>
+                    <span>{formatCurrency(part2Price)}</span>
                 </div>
                 <div className="pl-4 mt-1 space-y-1 text-muted-foreground text-xs">
                     <p>&#x21B3; Match: {part2.processed} ({part2.matchType})</p>
                     <p>&#x21B3; Search attempts: {part2.searchAttempts}</p>
                 </div>
             </div>
+
+            {/* Earring Logic Display */}
+            {isEarringProduct && (
+                <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-lg border-2 border-blue-200 dark:border-blue-800">
+                    <div className="font-semibold text-blue-900 dark:text-blue-100 mb-2">
+                        🎧 Earring/Stud Logic Applied
+                    </div>
+                    <div className="space-y-1 text-xs text-blue-800 dark:text-blue-200">
+                        <p>Type: {earringLogic.type}</p>
+                        <p>Reason: {earringLogic.note}</p>
+                        <div className="pt-2 space-y-1">
+                            <p>• MFG Part: {formatCurrency(mfgPrice)} → 2× = {formatCurrency(earringLogic.doubledMfgPrice)}</p>
+                            <p>• Part #2: {formatCurrency(part2Price)} → 2× = {formatCurrency(earringLogic.doubledPart2Price)}</p>
+                        </div>
+                    </div>
+                </div>
+            )}
             
             {/* Calculation Summary */}
             <div className="pt-2 font-semibold">
-                <p>Calculation: Lee's full success: MFG ({formatCurrency(mfgPrice)}) + Part2 ({formatCurrency(part2Price)}) = {formatCurrency(total)}</p>
+                {isEarringProduct ? (
+                    <div className="space-y-1">
+                        <p>Base calculation: MFG ({formatCurrency(mfgPrice)}) + Part2 ({formatCurrency(part2Price)}) = {formatCurrency(baseCost)}</p>
+                        <p className="text-blue-600 dark:text-blue-400">
+                            Final with earring logic: {formatCurrency(earringLogic.doubledMfgPrice)} + {formatCurrency(earringLogic.doubledPart2Price)} = {formatCurrency(calculation.totalCost)}
+                        </p>
+                    </div>
+                ) : (
+                    <p>Calculation: Lee's full success: MFG ({formatCurrency(mfgPrice)}) + Part2 ({formatCurrency(part2Price)}) = {formatCurrency(calculation.totalCost || baseCost)}</p>
+                )}
             </div>
         </div>
     );
@@ -66,6 +99,10 @@ const LeesManufacturingDetails = ({ details }: { details: any }) => {
 
 
 const StandardMetalDetails = ({ details }: { details: any }) => {
+    const calculation = details.calculation || {};
+    const { earringLogic } = calculation;
+    const isEarringProduct = earringLogic?.detected;
+    
     return (
         <div className="space-y-4 text-sm">
             {details.purity && (
@@ -98,13 +135,49 @@ const StandardMetalDetails = ({ details }: { details: any }) => {
                     </div>
                 </div>
             )}
+
+            {/* Earring Logic Display for Standard Calculation */}
+            {isEarringProduct && (
+                <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-lg border-2 border-blue-200 dark:border-blue-800">
+                    <div className="font-semibold text-blue-900 dark:text-blue-100 mb-2">
+                        🎧 Earring/Stud Logic Applied
+                    </div>
+                    <div className="space-y-1 text-xs text-blue-800 dark:text-blue-200">
+                        <p>Type: {earringLogic.type}</p>
+                        <p>Reason: {earringLogic.note}</p>
+                        <div className="pt-2 space-y-1">
+                            <p>• Base Cost: {formatCurrency(calculation.baseCost)}</p>
+                            <p>• Multiplier: ×{earringLogic.multiplier}</p>
+                            <p>• Final Cost: {formatCurrency(earringLogic.doubledCost)}</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Calculation Summary */}
+            {calculation && (
+                <div className="pt-2 font-semibold font-mono">
+                    {isEarringProduct ? (
+                        <div className="space-y-1">
+                            <p>Base calculation: {formatCurrency(calculation.rate)} × {calculation.weight}g = {formatCurrency(calculation.baseCost)}</p>
+                            <p className="text-blue-600 dark:text-blue-400">
+                                Final with earring logic: {formatCurrency(calculation.baseCost)} × 2 = {formatCurrency(calculation.totalCost)}
+                            </p>
+                        </div>
+                    ) : (
+                        <p>Calculation: {formatCurrency(calculation.rate)} × {calculation.weight}g = {formatCurrency(calculation.totalCost)}</p>
+                    )}
+                </div>
+            )}
         </div>
     );
 };
 
 
 const MetalCostDetails = ({ details }: { details: any }) => {
-    if (!details) return null;
+    if (!details) {
+        return null;
+    }
 
     const renderDetails = () => {
         if (details.calculationMethod === 'supplier_specific') {
@@ -146,7 +219,9 @@ const MetalCostDetails = ({ details }: { details: any }) => {
   };
 
 const LaborCostDetails = ({ details }: { details: any }) => {
-    if (!details) return null;
+    if (!details) {
+        return null;
+    }
 
     return (
         <div className="space-y-4 text-sm">

@@ -71,18 +71,31 @@ const estimateProductCostFlow = ai.defineFlow(
   async ({ rawData, productSpecifications, productTitle, productDescription }) => {
     // Best-effort preload of pricing from Google Sheets (falls back silently)
     try { await preloadPricingFromGoogleSheets(); } catch {}
+    
+    // Create product data object for earring detection
+    const productData = {
+      Title: productTitle || rawData?.Title || '',
+      Description: productDescription || rawData?.Description || '',
+      Category: rawData?.Category || '',
+      Type: rawData?.Type || '',
+      Name: rawData?.Name || '',
+      ...rawData // Include all raw data fields
+    };
+    
     // 1. Calculate individual costs
-    const metalCostResult = calculateMetalCost(rawData, productSpecifications);
+    const metalCostResult = calculateMetalCost(rawData, productSpecifications, productData);
     const laborCostResult = calculateLaborCost(productSpecifications);
     let diamondBillResult = calculateDiamondBill(rawData, productSpecifications);
     const gemstoneBillResult = calculateGemstoneBill(productSpecifications);
 
 
-    const materialCost = metalCostResult.isSuccess ? metalCostResult.metalCost : "ERROR";
-    const laborCost = laborCostResult.laborCost;
+    const { isSuccess, metalCost } = metalCostResult;
+    const materialCost = isSuccess ? metalCost : "ERROR";
+    const { laborCost } = laborCostResult;
    
     let diamondCost = diamondBillResult?.billData?.total_bill || 0;
-    const gemstoneCost = gemstoneBillResult.isSuccess ? gemstoneBillResult.billData?.total_bill || 0 : 0;
+    const gemstoneCost = gemstoneBillResult.isSuccess ? 
+        gemstoneBillResult.billData?.total_bill || 0 : 0;
 
 
     // 2. Total Carat Weight Validation
@@ -94,8 +107,8 @@ const estimateProductCostFlow = ai.defineFlow(
       // Sum carats from diamonds
       if (diamondBillResult?.isSuccess && diamondBillResult.billData?.diamonds) {
         for (const diamond of diamondBillResult.billData.diamonds) {
-          const caratPerUnit = diamond.carat_per_unit || 0;
-          calculatedTotalCarat += caratPerUnit * diamond.quantity;
+          const { carat_per_unit: caratPerUnit = 0, quantity } = diamond;
+          calculatedTotalCarat += caratPerUnit * quantity;
         }
       }
 
@@ -103,8 +116,8 @@ const estimateProductCostFlow = ai.defineFlow(
       // Sum carats from gemstones
        if (gemstoneBillResult?.isSuccess && gemstoneBillResult.billData?.gemstones) {
         for (const gemstone of gemstoneBillResult.billData.gemstones) {
-           const caratPerUnit = gemstone.carat_per_unit || 0;
-          calculatedTotalCarat += caratPerUnit * gemstone.quantity;
+           const { carat_per_unit: caratPerUnit = 0, quantity } = gemstone;
+          calculatedTotalCarat += caratPerUnit * quantity;
         }
       }
 

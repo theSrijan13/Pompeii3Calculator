@@ -23,13 +23,13 @@ const EnrichProductSpecificationsInputSchema = z.object({
 export type EnrichProductSpecificationsInput = z.infer<typeof EnrichProductSpecificationsInputSchema>;
 
 const DiamondDetailSchema = z.object({
-  diamondType: z.string(),
+  diamondType: z.string().describe('Must be either "Natural" for natural diamonds or "Lab" for lab-grown diamonds'),
   size: z.number().optional(),
   quantity: z.number(),
   carat_value: z.string().nullable(),
   width: z.number().optional(),
   shape: z.string().optional(),
-  lookupCode: z.string().optional().describe('The code to use for data sheet lookups, e.g., ND+6.5'),
+  lookupCode: z.string().optional().describe('The code to use for data sheet lookups, e.g., ND+6.5 for natural or LD+6.5 for lab diamonds'),
 });
 
 const GemstoneDetailSchema = z.object({
@@ -106,6 +106,18 @@ const enrichProductSpecificationsPrompt = ai.definePrompt({
         -   Identify the number as a lookup code ("6.5").
         -   **CRITICAL**: You MUST normalize "plus" to a "+" sign. The final lookupCode MUST be in the format 'ND+6.5' or 'LD+6.5', depending on if the diamond is natural or lab-grown. Store this in the 'lookupCode' field.
 
+### Rule 2.2.1: Diamond Type Classification (CRITICAL)
+-   **Purpose**: To correctly classify each diamond as either Natural or Lab-Grown for proper pricing.
+-   **Required Action**: For EVERY diamond entry, you MUST set the 'diamondType' field to one of these exact values:
+    -   "Natural" - for natural diamonds
+    -   "Lab" - for lab-grown diamonds  
+-   **Classification Logic**:
+    -   If the product title, description, or pick fields contain keywords like "lab grown", "lab-grown", "synthetic", "created", "cultured", then set diamondType to "Lab"
+    -   If a lookupCode starts with "LD", then set diamondType to "Lab"  
+    -   If a lookupCode starts with "ND", then set diamondType to "Natural"
+    -   If no clear indication is found, default to "Natural"
+-   **Consistency Rule**: The diamondType field MUST match the prefix used in the lookupCode (ND = Natural, LD = Lab)
+
 ### Rule 2.3: Special Diamond Notation (Zero Notations)
 -   **Purpose**: To parse special "zero" notations into the correct 'lookupCode'.
 -   **Action**: First, determine if the diamond is a Natural Diamond (ND) or Lab-Grown Diamond (LD) from the context. Then, apply the correct prefix.
@@ -162,14 +174,14 @@ Your final output MUST strictly adhere to this Zod schema. Do NOT add extra text
   "diamond_details": {
     "diamonds": [
       {
-        "diamondType": "string",
+        "diamondType": "Natural" | "Lab",
         "size": number (optional),
         "quantity": number,
         "carat_value": "string" (nullable),
-        "lookupCode": "string" (optional, e.g., "ND+6.5")
+        "lookupCode": "string" (optional, e.g., "ND+6.5" for natural, "LD+6.5" for lab)
       },
       {
-        "diamondType": "string",
+        "diamondType": "Natural" | "Lab",
         "width": number,
         "shape": "string",
         "quantity": number
@@ -239,7 +251,7 @@ const enrichProductSpecificationsFlow = ai.defineFlow(
     if (!output) {
       console.warn("AI failed to return structured data, using default structure");
       // Provide a default structure when AI fails
-      const defaultOutput = {
+      return {
         metal_purity: productData.MetalType || productData.Metal || "Unknown",
         metal_weight: productData.Weight || productData.MetalWeight || "0",
         stone_used: productData.StoneType || productData.Stone || "None",
@@ -251,7 +263,6 @@ const enrichProductSpecificationsFlow = ai.defineFlow(
           shape_consistency: "Unable to analyze - AI processing failed"
         }
       };
-      return defaultOutput;
     }
     
     // Validate the JSON structure immediately after receiving it from the AI.

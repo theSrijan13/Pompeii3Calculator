@@ -202,17 +202,40 @@ function safePriceDataAccess(data: any[]): DiamondPriceData[] {
 }
 
 function normalizeDiamondType(type: string): string {
-  if (!type || typeof type !== 'string') return '';
+  if (!type || typeof type !== 'string') {
+    return '';
+  }
   
   const normalized = type.toLowerCase().trim();
   
   if (normalized.includes('natural') || normalized.includes('nd')) {
     return DIAMOND_TYPES.NATURAL;
-  } else if (normalized.includes('lab') || normalized.includes('ld')) {
+  } else if (normalized.includes('lab') || normalized.includes('ld') || 
+             normalized.includes('synthetic') || normalized.includes('created') || 
+             normalized.includes('cultured') || normalized.includes('grown')) {
     return DIAMOND_TYPES.LAB;
   }
   
   return normalized;
+}
+
+/**
+ * Extracts the diamond type from a lookup code
+ */
+function getDiamondTypeFromLookupCode(lookupCode: string): string {
+  if (!lookupCode || typeof lookupCode !== 'string') {
+    return 'Natural'; // default
+  }
+  
+  const cleanLookupCode = lookupCode.replace(/\s+plus\s+/gi, "+").trim();
+  
+  if (cleanLookupCode.toUpperCase().startsWith("LD")) {
+    return 'Lab Grown Diamond';
+  } else if (cleanLookupCode.toUpperCase().startsWith("ND")) {
+    return 'Natural Diamond';
+  }
+  
+  return 'Natural'; // default
 }
 
 /**
@@ -479,10 +502,14 @@ function findDiamondByWidth(width: number, diamondType: string): PriceResult {
   let minDiff = Infinity;
 
   for (const entry of dataSet) {
-    if (!entry.sizeMm) continue;
+    if (!entry.sizeMm) {
+      continue;
+    }
 
     const mmValue = parseMmValue(entry.sizeMm);
-    if (mmValue === null) continue;
+    if (mmValue === null) {
+      continue;
+    }
 
     const diff = Math.abs(mmValue - width);
     if (diff < minDiff) {
@@ -569,7 +596,12 @@ function calculateDiamondEntry(
   earringNote: string
 ): BillEntry {
   const quantity = (typeof diamond.quantity === 'number' && diamond.quantity > 0) ? diamond.quantity : 1;
-  const diamondType = diamond.diamondType || 'Natural';
+  
+  // Determine diamond type: first check lookup code, then fallback to diamondType field, then default to Natural
+  let diamondType = diamond.diamondType || 'Natural';
+  if (diamond.lookupCode && typeof diamond.lookupCode === 'string') {
+    diamondType = getDiamondTypeFromLookupCode(diamond.lookupCode);
+  }
   
   let priceResult: PriceResult;
   let pricingMethod: BillEntry['pricing_method'];
@@ -809,5 +841,6 @@ export {
   findDiamondByWidth,
   validateInput,
   validateDiamond,
-  normalizeDiamondType
+  normalizeDiamondType,
+  getDiamondTypeFromLookupCode
 };
